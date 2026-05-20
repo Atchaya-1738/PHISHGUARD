@@ -1,6 +1,6 @@
 """
-PhishGuard - Flask Backend (Render Deployment Ready)
-====================================================
+PhishGuard - Flask Backend (Neon + Render Ready)
+================================================
 """
 
 import os
@@ -8,6 +8,8 @@ import re
 import json
 import time
 import joblib
+import psycopg2
+
 from datetime import datetime
 from flask import Flask, request, jsonify
 
@@ -25,6 +27,36 @@ app = Flask(
     static_folder=os.path.join(ROOT_DIR, "frontend"),
     static_url_path=""
 )
+
+# ─────────────────────────────────────────────────────────────
+# NEON DATABASE CONNECTION
+# ─────────────────────────────────────────────────────────────
+DATABASE_URL = "postgresql://neondb_owner:npg_RV2aWmD9QuOq@ep-holy-leaf-apd75mqg-pooler.c-7.us-east-1.aws.neon.tech/neondb?sslmode=require&channel_binding=require"
+
+conn = psycopg2.connect(DATABASE_URL)
+cur = conn.cursor()
+
+# ─────────────────────────────────────────────────────────────
+# CREATE TABLE
+# ─────────────────────────────────────────────────────────────
+cur.execute("""
+CREATE TABLE IF NOT EXISTS scan_history (
+
+    id SERIAL PRIMARY KEY,
+
+    subject TEXT,
+
+    body TEXT,
+
+    prediction TEXT,
+
+    confidence INTEGER,
+
+    created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+)
+""")
+
+conn.commit()
 
 # ─────────────────────────────────────────────────────────────
 # MODEL PATHS
@@ -248,6 +280,21 @@ def predict():
     # Update stats
     session_stats["scanned"] += 1
     session_stats[prediction] += 1
+
+    # SAVE TO NEON DATABASE
+    cur.execute("""
+    INSERT INTO scan_history
+    (subject, body, prediction, confidence)
+
+    VALUES (%s, %s, %s, %s)
+    """, (
+        subject,
+        body,
+        prediction,
+        confidence
+    ))
+
+    conn.commit()
 
     # Messages
     messages = {
