@@ -1,0 +1,588 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PhishGuard – Email Security Scanner</title>
+<link href="https://fonts.googleapis.com/css2?family=Orbitron:wght@400;700;900&family=Share+Tech+Mono&family=Rajdhani:wght@300;400;600;700&display=swap" rel="stylesheet">
+<style>
+/* ── TOKENS ─────────────────────────────────────────── */
+:root {
+  --bg:        #050d1a;
+  --card:      #08152a;
+  --input:     #0c1c33;
+  --border:    rgba(0,229,255,.12);
+  --cyan:      #00e5ff;
+  --purple:    #7c3aed;
+  --violet:    #a855f7;
+  --green:     #00ff88;
+  --red:       #ff2d55;
+  --orange:    #ff8c00;
+  --yellow:    #ffd600;
+  --text:      #c8d8f0;
+  --muted:     #446070;
+  --grid:      rgba(0,229,255,.035);
+}
+
+/* ── RESET & BASE ───────────────────────────────────── */
+*{margin:0;padding:0;box-sizing:border-box}
+html{scroll-behavior:smooth}
+body{
+  font-family:'Rajdhani',sans-serif;
+  background:var(--bg);
+  color:var(--text);
+  min-height:100vh;
+  overflow-x:hidden;
+  background-image:
+    linear-gradient(var(--grid) 1px,transparent 1px),
+    linear-gradient(90deg,var(--grid) 1px,transparent 1px);
+  background-size:44px 44px;
+}
+body::before{
+  content:'';
+  position:fixed;inset:0;
+  background:
+    radial-gradient(ellipse 60% 50% at 15% 15%,rgba(124,58,237,.13) 0%,transparent 70%),
+    radial-gradient(ellipse 50% 40% at 85% 85%,rgba(0,229,255,.09) 0%,transparent 70%);
+  pointer-events:none;z-index:0;
+}
+
+/* ── LAYOUT ─────────────────────────────────────────── */
+.wrap{max-width:1060px;margin:0 auto;padding:32px 18px;position:relative;z-index:1}
+
+/* ── HEADER ─────────────────────────────────────────── */
+header{text-align:center;margin-bottom:38px}
+.logo{
+  font-family:'Orbitron',sans-serif;
+  font-size:clamp(2rem,6vw,3.4rem);
+  font-weight:900;
+  background:linear-gradient(130deg,#7c3aed 0%,#00e5ff 55%,#a855f7 100%);
+  -webkit-background-clip:text;-webkit-text-fill-color:transparent;background-clip:text;
+  letter-spacing:.16em;
+  filter:drop-shadow(0 0 24px rgba(0,229,255,.45));
+  animation:logoPulse 3s ease-in-out infinite;
+}
+@keyframes logoPulse{
+  0%,100%{filter:drop-shadow(0 0 22px rgba(124,58,237,.5))}
+  50%{filter:drop-shadow(0 0 38px rgba(0,229,255,.75))}
+}
+.tagline{
+  font-family:'Share Tech Mono',monospace;
+  font-size:.72rem;letter-spacing:.38em;color:var(--muted);
+  margin-top:5px;text-transform:uppercase;
+}
+
+/* ── STAT CARDS ─────────────────────────────────────── */
+.stats{display:grid;grid-template-columns:repeat(4,1fr);gap:13px;margin-bottom:24px}
+.stat{
+  background:var(--card);
+  border:1px solid var(--border);
+  border-radius:11px;padding:18px 12px;text-align:center;
+  position:relative;overflow:hidden;transition:border-color .3s;
+}
+.stat::after{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,var(--purple),var(--cyan));
+}
+.stat:hover{border-color:rgba(0,229,255,.3)}
+.stat-icon{font-size:1.5rem;margin-bottom:8px;display:block}
+.stat-val{
+  font-family:'Orbitron',sans-serif;font-size:1.7rem;font-weight:700;
+  line-height:1;margin-bottom:5px;
+}
+.stat-lbl{font-family:'Share Tech Mono',monospace;font-size:.58rem;letter-spacing:.18em;color:var(--muted);text-transform:uppercase}
+
+/* ── CARD ───────────────────────────────────────────── */
+.card{
+  background:var(--card);border:1px solid var(--border);
+  border-radius:14px;padding:26px;margin-bottom:18px;
+  position:relative;overflow:hidden;
+}
+.card::before{
+  content:'';position:absolute;top:0;left:0;right:0;height:2px;
+  background:linear-gradient(90deg,transparent,var(--purple),var(--cyan),transparent);
+}
+.card-title{
+  font-family:'Orbitron',sans-serif;font-size:.9rem;font-weight:700;
+  color:#fff;margin-bottom:22px;display:flex;align-items:center;gap:9px;
+}
+
+/* ── FORM ELEMENTS ──────────────────────────────────── */
+.lbl{
+  font-family:'Share Tech Mono',monospace;font-size:.64rem;letter-spacing:.2em;
+  text-transform:uppercase;color:var(--cyan);margin-bottom:7px;display:block;
+}
+.lbl span{color:var(--red);margin-left:3px}
+.field{
+  width:100%;background:var(--input);border:1px solid var(--border);
+  border-radius:8px;padding:12px 15px;color:var(--text);
+  font-family:'Rajdhani',sans-serif;font-size:1rem;
+  outline:none;transition:border-color .3s,box-shadow .3s;margin-bottom:17px;
+}
+.field:focus{border-color:var(--cyan);box-shadow:0 0 0 2px rgba(0,229,255,.1)}
+.field::placeholder{color:var(--muted)}
+#emailBody{resize:vertical;min-height:155px;line-height:1.65}
+
+/* ── HIGHLIGHTED PREVIEW ────────────────────────────── */
+#preview{
+  display:none;
+  width:100%;background:var(--input);border:1px solid var(--border);
+  border-radius:8px;padding:14px 15px;
+  line-height:1.85;font-size:.97rem;word-break:break-word;
+  margin-bottom:17px;min-height:155px;max-height:340px;overflow-y:auto;
+  white-space:pre-wrap;
+}
+
+/* category-specific highlight classes */
+.hl-spam  {background:rgba(255,45,85,.22);color:#ff6b8a;border-radius:3px;padding:1px 4px;font-weight:700;border-bottom:1px solid var(--red)}
+.hl-safe  {background:rgba(0,255,136,.18);color:#00ff88;border-radius:3px;padding:1px 4px;font-weight:700;border-bottom:1px solid var(--green)}
+.hl-phish {background:rgba(255,140,0,.22);color:#ffaa40;border-radius:3px;padding:1px 4px;font-weight:700;border-bottom:1px solid var(--orange)}
+
+/* ── LEGEND ─────────────────────────────────────────── */
+#legend{display:none;gap:16px;flex-wrap:wrap;margin-bottom:14px}
+.leg{display:flex;align-items:center;gap:6px;font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--muted)}
+.leg-dot{width:10px;height:10px;border-radius:2px}
+
+/* ── BUTTONS ─────────────────────────────────────────── */
+.btn-row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.btn{
+  border:none;border-radius:8px;padding:13px 32px;
+  font-family:'Orbitron',sans-serif;font-size:.78rem;font-weight:700;
+  letter-spacing:.13em;cursor:pointer;text-transform:uppercase;
+  transition:transform .2s,box-shadow .2s;position:relative;overflow:hidden;
+}
+.btn-scan{background:linear-gradient(135deg,#00b8d9,#00e5ff);color:#050d1a}
+.btn-scan:hover{transform:translateY(-2px);box-shadow:0 8px 26px rgba(0,229,255,.4)}
+.btn-reset{background:rgba(255,255,255,.06);color:var(--muted);border:1px solid var(--border)}
+.btn-reset:hover{border-color:rgba(0,229,255,.3);color:var(--text)}
+.btn.loading::after{
+  content:'';position:absolute;top:0;left:-100%;width:100%;height:100%;
+  background:linear-gradient(90deg,transparent,rgba(255,255,255,.3),transparent);
+  animation:sweep .7s ease infinite;
+}
+@keyframes sweep{to{left:100%}}
+
+/* ── RESULT PANEL ───────────────────────────────────── */
+#result{
+  display:none;margin-top:24px;border-radius:12px;
+  padding:22px;border:1px solid;
+  animation:popIn .4s cubic-bezier(.34,1.56,.64,1);
+}
+@keyframes popIn{from{opacity:0;transform:translateY(14px) scale(.97)}to{opacity:1;transform:none}}
+
+#result.r-ham    {background:rgba(0,255,136,.06);border-color:var(--green);box-shadow:0 0 28px rgba(0,255,136,.1)}
+#result.r-spam   {background:rgba(255,45,85,.07);border-color:var(--red);box-shadow:0 0 28px rgba(255,45,85,.13)}
+#result.r-phishing{background:rgba(255,140,0,.07);border-color:var(--orange);box-shadow:0 0 28px rgba(255,140,0,.13)}
+
+.r-badge{
+  font-family:'Orbitron',sans-serif;font-size:1.3rem;font-weight:900;
+  display:flex;align-items:center;gap:10px;margin-bottom:14px;
+}
+.r-dot{width:13px;height:13px;border-radius:50%;animation:blink 1s ease infinite}
+@keyframes blink{0%,100%{opacity:1}50%{opacity:.25}}
+.r-ham .r-dot    {background:var(--green);box-shadow:0 0 10px var(--green)}
+.r-spam .r-dot   {background:var(--red);box-shadow:0 0 10px var(--red)}
+.r-phishing .r-dot{background:var(--orange);box-shadow:0 0 10px var(--orange)}
+.r-ham .r-badge    {color:var(--green)}
+.r-spam .r-badge   {color:var(--red)}
+.r-phishing .r-badge{color:var(--orange)}
+
+.r-desc{font-size:1rem;line-height:1.65;margin-bottom:15px;color:var(--text)}
+
+/* confidence */
+.conf-lbl{font-family:'Share Tech Mono',monospace;font-size:.63rem;letter-spacing:.14em;color:var(--muted);margin-bottom:5px;text-transform:uppercase}
+.conf-bar{height:5px;background:rgba(255,255,255,.07);border-radius:3px;overflow:hidden;margin-bottom:14px}
+.conf-fill{height:100%;border-radius:3px;width:0;transition:width 1s cubic-bezier(.4,0,.2,1)}
+.r-ham .conf-fill    {background:linear-gradient(90deg,#00c853,var(--green))}
+.r-spam .conf-fill   {background:linear-gradient(90deg,#c62828,var(--red))}
+.r-phishing .conf-fill{background:linear-gradient(90deg,#e65100,var(--orange))}
+
+/* chips */
+.chips-box{background:rgba(0,0,0,.2);border-radius:8px;padding:13px;margin-top:2px}
+.chips-title{font-family:'Share Tech Mono',monospace;font-size:.6rem;letter-spacing:.18em;color:var(--muted);text-transform:uppercase;margin-bottom:9px}
+.chips{display:flex;flex-wrap:wrap;gap:6px}
+.chip{
+  padding:3px 11px;border-radius:20px;
+  font-family:'Share Tech Mono',monospace;font-size:.68rem;font-weight:600;
+}
+.chip-spam  {background:rgba(255,45,85,.18);color:#ff6b8a;border:1px solid rgba(255,45,85,.35)}
+.chip-ham   {background:rgba(0,255,136,.14);color:#00ff88;border:1px solid rgba(0,255,136,.3)}
+.chip-phish {background:rgba(255,140,0,.18);color:#ffaa40;border:1px solid rgba(255,140,0,.35)}
+
+/* ── WORD REFERENCE PANELS ──────────────────────────── */
+.panels{display:grid;grid-template-columns:1fr 1fr;gap:14px;margin-top:18px}
+.panel{background:var(--card);border:1px solid var(--border);border-radius:11px;padding:18px;position:relative;overflow:hidden}
+.panel::before{content:'';position:absolute;top:0;left:0;right:0;height:2px}
+.panel-spam::before{background:linear-gradient(90deg,var(--red),transparent)}
+.panel-ham::before {background:linear-gradient(90deg,var(--green),transparent)}
+.panel-title{font-family:'Orbitron',sans-serif;font-size:.72rem;font-weight:700;margin-bottom:12px;display:flex;align-items:center;gap:8px}
+.panel-spam .panel-title{color:var(--red)}
+.panel-ham  .panel-title{color:var(--green)}
+.word-grid{display:flex;flex-wrap:wrap;gap:5px}
+
+/* ── RESPONSIVE ─────────────────────────────────────── */
+@media(max-width:640px){
+  .stats{grid-template-columns:repeat(2,1fr)}
+  .panels{grid-template-columns:1fr}
+}
+
+/* scrollbar */
+::-webkit-scrollbar{width:5px}
+::-webkit-scrollbar-track{background:var(--bg)}
+::-webkit-scrollbar-thumb{background:var(--purple);border-radius:3px}
+
+/* status indicator */
+.status-dot{
+  display:inline-block;width:8px;height:8px;border-radius:50%;
+  background:var(--green);box-shadow:0 0 8px var(--green);
+  animation:blink 2s ease infinite;margin-right:6px;
+}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <!-- HEADER -->
+  <header>
+    <div class="logo">PHISHGUARD</div>
+    <div class="tagline">Real-Time Email Security Scanner · ML-Powered Detection</div>
+  </header>
+
+  <!-- STATS -->
+  <div class="stats">
+    <div class="stat">
+      <span class="stat-icon">🔍</span>
+      <div class="stat-val" id="sScanned" style="color:var(--cyan)">0</div>
+      <div class="stat-lbl">Emails Scanned</div>
+    </div>
+    <div class="stat">
+      <span class="stat-icon">✅</span>
+      <div class="stat-val" id="sSafe" style="color:var(--green)">0</div>
+      <div class="stat-lbl">Safe Emails</div>
+    </div>
+    <div class="stat">
+      <span class="stat-icon">⚠️</span>
+      <div class="stat-val" id="sSpam" style="color:var(--yellow)">0</div>
+      <div class="stat-lbl">Spam Detected</div>
+    </div>
+    <div class="stat">
+      <span class="stat-icon">🚫</span>
+      <div class="stat-val" id="sPhish" style="color:var(--red)">0</div>
+      <div class="stat-lbl">Phishing Blocked</div>
+    </div>
+  </div>
+
+  <!-- SCANNER CARD -->
+  <div class="card">
+    <div class="card-title">
+      <span>🔎</span> Email Scanner
+      <span style="margin-left:auto;font-size:.7rem;font-family:'Share Tech Mono',monospace;color:var(--muted)">
+        <span class="status-dot"></span>Model Active
+      </span>
+    </div>
+
+    <label class="lbl">Email Subject (Optional)</label>
+    <input class="field" id="emailSubject" type="text" placeholder="Enter email subject line...">
+
+    <label class="lbl">Email Content <span>★</span></label>
+
+    <!-- textarea (shown before scan) -->
+    <textarea class="field" id="emailBody" placeholder="Paste email content here for analysis..."></textarea>
+
+    <!-- highlighted preview (shown after scan — replaces textarea visually) -->
+    <div id="preview"></div>
+
+    <!-- legend -->
+    <div id="legend" style="display:none;gap:16px;flex-wrap:wrap;margin-bottom:14px">
+      <div class="leg"><div class="leg-dot" id="legDot" style="background:rgba(255,45,85,.5);border:1px solid var(--red)"></div> <span id="legText">Spam trigger words</span></div>
+    </div>
+
+    <div class="btn-row">
+      <button class="btn btn-scan" id="btnScan" onclick="scan()">SCAN EMAIL</button>
+      <button class="btn btn-reset" onclick="reset()">RESET</button>
+      <span id="respTime" style="font-family:'Share Tech Mono',monospace;font-size:.62rem;color:var(--muted);margin-left:4px"></span>
+    </div>
+
+    <!-- RESULT -->
+    <div id="result">
+      <div class="r-badge"><div class="r-dot"></div><span id="rTitle"></span></div>
+      <div class="r-desc" id="rDesc"></div>
+      <div class="conf-lbl">Confidence — <span id="rPct"></span></div>
+      <div class="conf-bar"><div class="conf-fill" id="rBar"></div></div>
+      <div class="chips-box">
+        <div class="chips-title">🏷 Detected Signal Words</div>
+        <div class="chips" id="rChips"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- WORD REFERENCE PANELS -->
+  <div class="panels">
+    <div class="panel panel-spam">
+      <div class="panel-title">🚨 Spam & Phishing Trigger Words</div>
+      <div class="word-grid" id="spamGrid"></div>
+    </div>
+    <div class="panel panel-ham">
+      <div class="panel-title">✅ Legitimate (Ham) Signal Words</div>
+      <div class="word-grid" id="hamGrid"></div>
+    </div>
+  </div>
+
+</div><!-- /wrap -->
+
+<script>
+// ─────────────────────────────────────────────
+// WORD DICTIONARIES (mirrored from backend)
+// ─────────────────────────────────────────────
+const SPAM_WORDS = [
+  "free","win","winner","prize","congratulations","urgent","limited time",
+  "click here","verify","account suspended","credit card","password",
+  "social security","expire","unsubscribe","bulk","offer","deal","discount",
+  "cash","earn","income","million","dollar","investment","guarantee","risk free",
+  "selected","promotion","buy now","order now","call now","subscribe","cheap",
+  "double your","make money","work from home","extra income","increase sales",
+  "marketing","special offer","exclusive","reward","claim","refund",
+  "pre-approved","lose weight","act now","no experience","100 percent",
+  "no credit check","passive income","proven system","secret formula","hot singles",
+];
+
+const PHISH_WORDS = [
+  "verify your account","click the link","update payment","unusual activity",
+  "sign in immediately","account will be closed","confirm identity",
+  "billing information","enter your credentials","login details","access suspended",
+  "security alert","paypal","apple id","microsoft account","google account",
+  "amazon account","tax refund","irs","bank of america","chase","wells fargo",
+  "citibank","hdfc","barclays","hsbc","reset your password","account locked",
+  "account has been","suspended","compromised","unauthorized","failed to process",
+  "confirm your account","your credentials","social security number",
+  "credit card number","routing number","card number","date of birth","one-time pin",
+];
+
+const HAM_WORDS = [
+  "meeting","schedule","regards","sincerely","please find","attached","per our",
+  "following up","thank you","best regards","kind regards","let me know","team",
+  "project","update","report","quarterly","weekly","discussion","agenda",
+  "conference","zoom","feedback","review","deadline","task","completed","hello",
+  "dear","good morning","colleague","department","office","approved","confirmed",
+  "booking","appointment","reminder","receipt","invoice approved","payment processed",
+  "performance review","compliance","helpdesk",
+];
+
+// ─────────────────────────────────────────────
+// POPULATE REFERENCE PANELS
+// ─────────────────────────────────────────────
+(function populatePanels(){
+  const sg = document.getElementById('spamGrid');
+  const hg = document.getElementById('hamGrid');
+  [...PHISH_WORDS.slice(0,14), ...SPAM_WORDS.slice(0,20)].forEach(w=>{
+    sg.innerHTML += `<span class="chip chip-spam">${w}</span>`;
+  });
+  HAM_WORDS.forEach(w=>{
+    hg.innerHTML += `<span class="chip chip-ham">${w}</span>`;
+  });
+})();
+
+// ─────────────────────────────────────────────
+// SESSION STATS (local counters as fallback)
+// ─────────────────────────────────────────────
+let local = {scanned:0, ham:0, spam:0, phishing:0};
+function setStats(s){
+  document.getElementById('sScanned').textContent = s.scanned;
+  document.getElementById('sSafe').textContent    = s.ham;
+  document.getElementById('sSpam').textContent    = s.spam;
+  document.getElementById('sPhish').textContent   = s.phishing;
+}
+
+// ─────────────────────────────────────────────
+// HIGHLIGHT ONLY RELEVANT WORDS
+// ─────────────────────────────────────────────
+function escRx(s){ return s.replace(/[.*+?^${}()|[\]\\]/g,'\\$&') }
+
+function highlight(text, label){
+  // HTML-escape
+  let out = text.replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;');
+
+  if(label === 'spam'){
+    // highlight spam words in RED only
+    [...SPAM_WORDS].sort((a,b)=>b.length-a.length).forEach(w=>{
+      out = out.replace(new RegExp(`(${escRx(w)})`,'gi'), '<span class="hl-spam">$1</span>');
+    });
+  } else if(label === 'ham'){
+    // highlight ham/safe words in GREEN only
+    [...HAM_WORDS].sort((a,b)=>b.length-a.length).forEach(w=>{
+      out = out.replace(new RegExp(`(?!<[^>]*)(${escRx(w)})(?![^<]*>)`,'gi'),
+        (m,p)=>`<span class="hl-safe">${p}</span>`);
+    });
+  } else if(label === 'phishing'){
+    // highlight phishing phrases in ORANGE only
+    [...PHISH_WORDS].sort((a,b)=>b.length-a.length).forEach(w=>{
+      out = out.replace(new RegExp(`(${escRx(w)})`,'gi'), '<span class="hl-phish">$1</span>');
+    });
+  }
+
+  return out.replace(/\n/g,'<br>');
+}
+
+// ─────────────────────────────────────────────
+// FALLBACK CLASSIFIER (when Flask not running)
+// ─────────────────────────────────────────────
+function localClassify(subject, body){
+  const t = (subject + ' ' + body).toLowerCase();
+  let phScore=0, spScore=0, hmScore=0;
+  const fp=[],fs=[],fh=[];
+
+  PHISH_WORDS.forEach(w=>{ if(t.includes(w)){ phScore+=3; fp.push(w)} });
+  SPAM_WORDS.forEach(w=>{  if(t.includes(w)){ spScore+=2; fs.push(w)} });
+  HAM_WORDS.forEach(w=>{   if(t.includes(w)){ hmScore+=1; fh.push(w)} });
+
+  let label, conf;
+  if(phScore>3){ label='phishing'; conf=Math.min(97,62+phScore*4); }
+  else if(spScore>hmScore && spScore>2){ label='spam'; conf=Math.min(95,58+spScore*3); }
+  else{ label='ham'; conf=Math.min(94,60+hmScore*4-spScore*2); conf=Math.max(52,conf); }
+
+  const msgs={
+    ham:'This email appears to be legitimate. No significant spam or phishing signals were detected. The content aligns with typical professional communication patterns.',
+    spam:'This email has been flagged as SPAM. It contains multiple unsolicited or marketing content indicators. Do not click any links or download attachments.',
+    phishing:'⚠ WARNING: This email shows strong phishing characteristics. It may be attempting to steal your credentials or financial data. Do NOT click any links or provide any personal information.',
+  };
+
+  return { label, confidence:conf, message:msgs[label],
+           signal_words:{spam:fs.slice(0,10), phishing:fp.slice(0,10), ham:fh.slice(0,8)} };
+}
+
+// ─────────────────────────────────────────────
+// RENDER RESULT
+// ─────────────────────────────────────────────
+function renderResult(data, body){
+  const { label, confidence, message, signal_words } = data;
+
+  // Colour the textarea border
+  const ta = document.getElementById('emailBody');
+  ta.style.borderColor = label==='ham' ? 'var(--green)' : label==='spam' ? 'var(--red)' : 'var(--orange)';
+  ta.style.boxShadow   = label==='ham'
+    ? '0 0 0 2px rgba(0,255,136,.12)'
+    : label==='spam'
+    ? '0 0 0 2px rgba(255,45,85,.15)'
+    : '0 0 0 2px rgba(255,140,0,.13)';
+
+  // Show highlighted preview, hide raw textarea
+  const prev = document.getElementById('preview');
+  const borderCol = label==='ham' ? 'var(--green)' : label==='spam' ? 'var(--red)' : 'var(--orange)';
+  prev.style.cssText = `display:block;border-color:${borderCol};box-shadow:0 0 0 2px ${
+    label==='ham' ? 'rgba(0,255,136,.12)' : label==='spam' ? 'rgba(255,45,85,.15)' : 'rgba(255,140,0,.13)'}`;
+  prev.innerHTML = highlight(body, label);
+  ta.style.display = 'none';
+
+  // Legend — show only the relevant category
+  const leg = document.getElementById('legend');
+  const dot = document.getElementById('legDot');
+  const ltxt = document.getElementById('legText');
+  leg.style.display = 'flex';
+  if(label==='ham'){
+    dot.style.cssText='background:rgba(0,255,136,.45);border:1px solid var(--green)';
+    ltxt.textContent='Safe / legitimate signal words';
+  } else if(label==='spam'){
+    dot.style.cssText='background:rgba(255,45,85,.45);border:1px solid var(--red)';
+    ltxt.textContent='Spam trigger words';
+  } else {
+    dot.style.cssText='background:rgba(255,140,0,.45);border:1px solid var(--orange)';
+    ltxt.textContent='Phishing signal phrases';
+  }
+
+  // Result panel
+  const res = document.getElementById('result');
+  res.className = '';
+  res.classList.add(label==='phishing' ? 'r-phishing' : label==='spam' ? 'r-spam' : 'r-ham');
+  res.style.display='block';
+
+  document.getElementById('rTitle').textContent =
+    label==='ham' ? '✅ LEGITIMATE EMAIL' :
+    label==='spam' ? '⚠️ SPAM DETECTED' : '🚨 PHISHING ATTEMPT';
+  document.getElementById('rDesc').textContent = message;
+  document.getElementById('rPct').textContent  = confidence + '%';
+  setTimeout(()=>{ document.getElementById('rBar').style.width = confidence+'%' }, 100);
+
+  // Chips — only for the relevant category
+  const chips = document.getElementById('rChips');
+  chips.innerHTML='';
+  const add=(words, cls, icon)=> words.slice(0,8).forEach(w=>{
+    chips.innerHTML += `<span class="chip ${cls}">${icon} ${w}</span>`;
+  });
+  if(label==='phishing') add(signal_words.phishing,'chip-phish','🎣');
+  else if(label==='spam') add(signal_words.spam,'chip-spam','⚠');
+  else add(signal_words.ham,'chip-ham','✓');
+
+  if(chips.children.length===0)
+    chips.innerHTML='<span style="color:var(--muted);font-size:.8rem">No specific signal words detected</span>';
+
+  res.scrollIntoView({behavior:'smooth',block:'nearest'});
+}
+
+// ─────────────────────────────────────────────
+// MAIN SCAN
+// ─────────────────────────────────────────────
+async function scan(){
+  const subject = document.getElementById('emailSubject').value.trim();
+  const body    = document.getElementById('emailBody').value.trim();
+
+  if(!body){
+    const ta=document.getElementById('emailBody');
+    ta.style.borderColor='var(--red)';
+    setTimeout(()=>ta.style.borderColor='',1200); return;
+  }
+
+  const btn = document.getElementById('btnScan');
+  btn.classList.add('loading'); btn.textContent='SCANNING...'; btn.disabled=true;
+
+  const t0 = Date.now();
+  let data;
+
+  try{
+    // Try Flask backend first
+    const resp = await fetch('/predict',{
+      method:'POST',
+      headers:{'Content-Type':'application/json'},
+      body:JSON.stringify({subject, body}),
+      signal: AbortSignal.timeout(3000)
+    });
+    if(!resp.ok) throw new Error('API error');
+    data = await resp.json();
+    // update stats from server
+    if(data.stats) setStats(data.stats);
+  } catch(e){
+    // Fallback to local rule-based classifier
+    await new Promise(r=>setTimeout(r,700)); // simulate latency
+    data = localClassify(subject, body);
+    // local stat tracking
+    local.scanned++; local[data.label]++;
+    setStats(local);
+  }
+
+  const ms = Date.now()-t0;
+  document.getElementById('respTime').textContent = `Response: ${ms}ms`;
+  btn.classList.remove('loading'); btn.textContent='SCAN EMAIL'; btn.disabled=false;
+
+  renderResult(data, body);
+}
+
+// ─────────────────────────────────────────────
+// RESET
+// ─────────────────────────────────────────────
+function reset(){
+  const ta=document.getElementById('emailBody');
+  ta.style.display=''; ta.style.borderColor=''; ta.style.boxShadow=''; ta.value='';
+  document.getElementById('emailSubject').value='';
+  document.getElementById('preview').style.display='none';
+  document.getElementById('legend').style.display='none';
+  document.getElementById('result').style.display='none';
+  document.getElementById('rBar').style.width='0%';
+  document.getElementById('respTime').textContent='';
+}
+
+// Enter on subject jumps to body
+document.getElementById('emailSubject').addEventListener('keydown',e=>{
+  if(e.key==='Enter') document.getElementById('emailBody').focus();
+});
+</script>
+</body>
+</html>
