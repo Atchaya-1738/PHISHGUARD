@@ -1,15 +1,6 @@
 """
-PhishGuard - Flask Backend (Deployment Ready)
-=============================================
-Serves the ML model predictions via REST API.
-
-Run Local:
-    python backend/backend.py
-
-Production Ready for:
-- Render
-- Railway
-- Azure
+PhishGuard - Flask Backend (Render Deployment Ready)
+====================================================
 """
 
 import os
@@ -18,7 +9,7 @@ import json
 import time
 import joblib
 from datetime import datetime
-from flask import Flask, request, jsonify, send_from_directory
+from flask import Flask, request, jsonify
 
 # ─────────────────────────────────────────────────────────────
 # PATH SETUP
@@ -91,7 +82,7 @@ SPAM_WORDS = [
     "free", "win", "winner", "prize",
     "urgent", "offer", "discount",
     "buy now", "claim", "refund",
-    "promotion", "exclusive",
+    "promotion", "exclusive"
 ]
 
 PHISH_WORDS = [
@@ -103,7 +94,7 @@ PHISH_WORDS = [
     "login details",
     "bank account",
     "credit card",
-    "reset password",
+    "reset password"
 ]
 
 HAM_WORDS = [
@@ -114,13 +105,14 @@ HAM_WORDS = [
     "thank you",
     "regards",
     "attached",
-    "conference",
+    "conference"
 ]
 
 # ─────────────────────────────────────────────────────────────
 # PREPROCESS FUNCTION
 # ─────────────────────────────────────────────────────────────
 def preprocess(text):
+
     if not isinstance(text, str):
         return ""
 
@@ -177,7 +169,7 @@ def find_signal_words(text):
     return spam_found, phish_found, ham_found
 
 # ─────────────────────────────────────────────────────────────
-# CONFIDENCE ESTIMATION
+# CONFIDENCE
 # ─────────────────────────────────────────────────────────────
 def get_confidence(label, text):
 
@@ -203,10 +195,7 @@ def get_confidence(label, text):
 @app.route("/")
 def index():
 
-    return send_from_directory(
-        os.path.join(ROOT_DIR, "frontend"),
-        "index.html"
-    )
+    return app.send_static_file("index.html")
 
 @app.route("/health")
 def health():
@@ -216,7 +205,7 @@ def health():
         "model": metadata["model_name"],
         "accuracy": metadata["accuracy"],
         "total_scanned": session_stats["scanned"],
-        "uptime_since": session_stats["start_time"],
+        "uptime_since": session_stats["start_time"]
     })
 
 @app.route("/stats")
@@ -235,6 +224,7 @@ def predict():
     body = data.get("body", "")
 
     if not body.strip():
+
         return jsonify({
             "error": "Email body is required"
         }), 400
@@ -243,13 +233,13 @@ def predict():
 
     clean_text = preprocess(full_text)
 
-    # Transform input
+    # Vectorize
     features = vectorizer.transform([clean_text])
 
     # Predict
     prediction = model.predict(features)[0]
 
-    # Signal words
+    # Signal Words
     spam_words, phish_words, ham_words = find_signal_words(full_text)
 
     # Confidence
@@ -261,20 +251,15 @@ def predict():
 
     # Messages
     messages = {
-        "ham": (
-            "This email appears legitimate "
-            "and safe."
-        ),
 
-        "spam": (
-            "This email has been identified "
-            "as spam. Avoid clicking links."
-        ),
+        "ham":
+        "This email appears legitimate and safe.",
 
-        "phishing": (
-            "WARNING: Possible phishing "
-            "attempt detected."
-        )
+        "spam":
+        "This email has been identified as spam. Avoid clicking links.",
+
+        "phishing":
+        "WARNING: Possible phishing attempt detected."
     }
 
     elapsed_ms = round(
@@ -291,9 +276,12 @@ def predict():
         "message": messages[prediction],
 
         "signal_words": {
+
             "spam": spam_words[:10],
+
             "phishing": phish_words[:10],
-            "ham": ham_words[:10],
+
+            "ham": ham_words[:10]
         },
 
         "stats": session_stats,
