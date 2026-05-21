@@ -1,0 +1,482 @@
+!pip install nltk --quiet
+
+import os
+import re
+import email          # Python built-in: parse raw .eml files
+import tarfile        # Python built-in: extract .tar archives
+import pandas as pd
+import numpy as np
+import nltk
+
+from email import policy
+from email.parser import BytesParser, Parser
+from bs4 import BeautifulSoup          # strip HTML from email bodies
+from nltk.corpus import stopwords
+from nltk.tokenize import word_tokenize
+from nltk.stem import WordNetLemmatizer, PorterStemmer
+from sklearn.feature_extraction.text import TfidfVectorizer
+from sklearn.model_selection import train_test_split
+from scipy.sparse import hstack, csr_matrix
+
+# Download NLTK data
+nltk.download('punkt')
+nltk.download('punkt_tab')
+nltk.download('stopwords')
+nltk.download('wordnet')
+
+print('✅ All libraries imported successfully')
+
+# ── Upload the file ──────────────────────────────────────────────────────────
+from google.colab import files
+
+print('📁 Please upload your "a2-spamassain" archive file...')
+uploaded = files.upload()          # A file picker dialog will appear
+
+# Get the uploaded filename automatically
+archive_name = list(uploaded.keys())[0]
+print(f'✅ Uploaded: {archive_name}')
+
+# ── Extract the archive ───────────────────────────────────────────────────────
+import zipfile
+import tarfile
+import shutil # For cleaning up temporary directories
+
+# EXTRACT_DIR is where the initial zip extracts to.
+# This will likely create a folder inside it, e.g., /content/spamassassin_data/a2-spamassain/
+TEMP_DIR = '/content/temp_extract'
+FINAL_EXTRACT_DIR = '/content/spamassassin_data' # Final destination for categorized emails
+
+os.makedirs(TEMP_DIR, exist_ok=True)
+os.makedirs(FINAL_EXTRACT_DIR, exist_ok=True)
+
+print(f'📦 Extracting initial archive "{archive_name}" (ZIP) → {TEMP_DIR} ...')
+
+# Assume archive_name is the .zip file
+with zipfile.ZipFile(archive_name, 'r') as zip_ref:
+    zip_ref.extractall(TEMP_DIR)
+
+print('✅ Initial ZIP extraction complete.')
+
+# Now, find the actual data archive (likely a .tar file named 'a2-spamassain')
+# It's expected to be nested one level deep within the extracted zip content.
+# For example, if zip extracted 'a2-spamassain/' directory, then the tar is in 'a2-spamassain/a2-spamassain'
+nested_archive_file = None
+
+# Look for a directory 'a2-spamassain' directly under TEMP_DIR
+extracted_root_content = os.listdir(TEMP_DIR)
+
+if len(extracted_root_content) == 1 and os.path.isdir(os.path.join(TEMP_DIR, extracted_root_content[0])):
+    intermediate_dir = os.path.join(TEMP_DIR, extracted_root_content[0])
+    # Now check if this intermediate_dir contains a file named 'a2-spamassain'
+    if 'a2-spamassain' in os.listdir(intermediate_dir) and os.path.isfile(os.path.join(intermediate_dir, 'a2-spamassain')):
+        nested_archive_file = os.path.join(intermediate_dir, 'a2-spamassain')
+else:
+    print(f"⚠️ Unexpected content in {TEMP_DIR}: {extracted_root_content}")
+    print("   Trying to find 'a2-spamassain' file directly in root of extraction.")
+    if 'a2-spamassain' in extracted_root_content and os.path.isfile(os.path.join(TEMP_DIR, 'a2-spamassain')):
+        nested_archive_file = os.path.join(TEMP_DIR, 'a2-spamassain')
+
+
+if nested_archive_file:
+    print(f'📦 Found nested data archive: "{nested_archive_file}". Extracting to {FINAL_EXTRACT_DIR} ...')
+    try:
+        # Extract the nested tar archive directly into FINAL_EXTRACT_DIR.
+        # This should create the ham/spam subfolders directly in FINAL_EXTRACT_DIR.
+        with tarfile.open(nested_archive_file, 'r:*') as tar:
+            tar.extractall(FINAL_EXTRACT_DIR)
+        print(f'✅ Nested data extraction complete. Categorized folders should now be in {FINAL_EXTRACT_DIR}.')
+
+        # Clean up the temporary directory
+        shutil.rmtree(TEMP_DIR)
+        print(f"🧹 Cleaned up temporary directory: {TEMP_DIR}")
+
+    except tarfile.ReadError as e:
+        print(f'❌ Error extracting nested archive "{nested_archive_file}" (likely not a tar file or corrupted): {e}')
+        print(f'   The `easy_ham`, `hard_ham`, `spam`, `spam_2` folders might not be present.')
+else:
+    print(f'⚠️  Could not locate a nested data archive named "a2-spamassain" within {TEMP_DIR}.')
+    print('   Please ensure the archive structure is as expected: a .zip containing a folder, which contains a .tar file.')
+
+
+# Show what was extracted (now in FINAL_EXTRACT_DIR, which should contain the ham/spam folders)
+top_level = os.listdir(FINAL_EXTRACT_DIR)
+print(f'\n📂 Top-level folders/files found in {FINAL_EXTRACT_DIR} (after all extractions):')
+for item in sorted(top_level):
+    print(f'   {item}')
+# ── Map folder names → labels ─────────────────────────
+# Adjust the folder names below if your archive uses different names
+# Based on inspection, the folders found are 'easy_ham' and 'a2-spamassain'.
+# Assuming 'a2-spamassain' contains the spam emails and 'easy_ham' contains ham.
+LABEL_MAP = {
+    'easy_ham':  0, # Ham category
+    'a2-spamassain': 1  # Spam category (assuming the remaining emails are spam)
+}
+
+records = []   # list of (filepath, label)
+
+# The final extracted data (containing easy_ham, hard_ham, spam, spam_2 folders)
+# is expected to be directly in FINAL_EXTRACT_DIR after the two-step extraction.
+# Ensure FINAL_EXTRACT_DIR is defined from the previous cell.
+# If running this cell independently, define FINAL_EXTRACT_DIR:
+if 'FINAL_EXTRACT_DIR' not in locals():
+    FINAL_EXTRACT_DIR = '/content/spamassassin_data'
+
+print(f"Inspecting contents of: {FINAL_EXTRACT_DIR}")
+if os.path.isdir(FINAL_EXTRACT_DIR):
+    print("Contents:", os.listdir(FINAL_EXTRACT_DIR))
+else:
+    print(f"Error: {FINAL_EXTRACT_DIR} is not a directory.")
+
+# Set the base path to FINAL_EXTRACT_DIR, as 'easy_ham' and 'a2-spamassain' are directly under it.
+base_data_path = FINAL_EXTRACT_DIR
+
+
+for folder, label in LABEL_MAP.items():
+    folder_path = os.path.join(base_data_path, folder)
+    
+    if not os.path.isdir(folder_path):
+        print(f'⚠️  Folder not found, skipping: {folder_path}')
+        continue
+    
+    files_in_folder = os.listdir(folder_path)
+    for fname in files_in_folder:
+        fpath = os.path.join(folder_path, fname)
+        if os.path.isfile(fpath): # Only process actual files, not subdirectories or the archive itself
+            records.append({'filepath': fpath, 'label': label, 'folder': folder})
+    print(f'   │ └─── │ {folder:<15} → {len(files_in_folder):>5} emails  (label={label})')
+
+df_paths = pd.DataFrame(records)
+print(f'\n✅ Total emails found: {len(df_paths)}')
+
+# Only attempt to print value_counts if df_paths is not empty
+if not df_paths.empty:
+    print(df_paths['label'].value_counts().rename({0: 'Ham', 1: 'Spam'}).to_string())
+else:
+    print("DataFrame is empty, no 'label' column to count.")
+def extract_body(msg):
+    """
+    Recursively walk a parsed email message and extract plain-text content.
+    Falls back to stripping HTML tags if only HTML parts exist.
+    """
+    body_parts = []
+
+    if msg.is_multipart():
+        for part in msg.walk():
+            ctype = part.get_content_type()
+            disposition = str(part.get('Content-Disposition', ''))
+            if 'attachment' in disposition:
+                continue   # skip file attachments
+            if ctype == 'text/plain':
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or 'utf-8'
+                    body_parts.append(payload.decode(charset, errors='replace'))
+            elif ctype == 'text/html':
+                payload = part.get_payload(decode=True)
+                if payload:
+                    charset = part.get_content_charset() or 'utf-8'
+                    soup = BeautifulSoup(payload.decode(charset, errors='replace'), 'html.parser')
+                    body_parts.append(soup.get_text(separator=' '))
+    else:
+        # Single-part email
+        payload = msg.get_payload(decode=True)
+        if payload:
+            charset = msg.get_content_charset() or 'utf-8'
+            text = payload.decode(charset, errors='replace')
+            if msg.get_content_type() == 'text/html':
+                soup = BeautifulSoup(text, 'html.parser')
+                text = soup.get_text(separator=' ')
+            body_parts.append(text)
+
+    return ' '.join(body_parts).strip()
+
+
+def parse_email_file(filepath):
+    """
+    Read a raw email file and return a dict of useful fields.
+    """
+    try:
+        with open(filepath, 'rb') as f:
+            msg = BytesParser(policy=policy.compat32).parse(f)
+
+        subject   = msg.get('Subject', '') or ''
+        sender    = msg.get('From', '')    or ''
+        recipient = msg.get('To', '')      or ''
+        body      = extract_body(msg)
+
+        # Combined text field (subject + body) for NLP
+        full_text = subject + ' ' + body
+
+        return {
+            'subject':   subject,
+            'sender':    sender,
+            'recipient': recipient,
+            'body':      body,
+            'full_text': full_text,
+        }
+    except Exception as e:
+        # Return empty strings on parse failure; we'll drop these later
+        return {'subject': '', 'sender': '', 'recipient': '', 'body': '', 'full_text': ''}
+
+
+print('🔍 Testing parser on first email...')
+sample = parse_email_file(df_paths['filepath'].iloc[0])
+print(f"   Subject : {sample['subject'][:80]}")
+print(f"   From    : {sample['sender'][:60]}")
+print(f"   Body    : {sample['body'][:120]}...")
+# ── Apply parser to all emails ────────────────────────────────────────────────
+# This may take 30–60 seconds for ~6000 emails
+print('📨 Parsing all email files (please wait)...')
+
+parsed_rows = df_paths['filepath'].apply(parse_email_file)
+df_parsed   = pd.DataFrame(parsed_rows.tolist())
+
+# Combine with labels
+df = pd.concat([df_paths[['label', 'folder']].reset_index(drop=True),
+                df_parsed.reset_index(drop=True)], axis=1)
+
+print(f'✅ Parsed {len(df)} emails')
+print(f'   Columns: {list(df.columns)}')
+df.head(3)
+def clean_text(text):
+    """
+    Full text-cleaning pipeline for one email string.
+    Returns a cleaned lowercase string.
+    """
+    if not isinstance(text, str):
+        return ''
+
+    # 1. Lowercase
+    text = text.lower()
+
+    # 2. Remove URLs  (http://... or www...)
+    text = re.sub(r'http\S+|www\.\S+', ' url ', text)
+
+    # 3. Remove email addresses
+    text = re.sub(r'\S+@\S+', ' email ', text)
+
+    # 4. Strip any leftover HTML tags
+    text = re.sub(r'<[^>]+>', ' ', text)
+
+    # 5. Remove numbers (optional — change to keep if you want numeric features)
+    text = re.sub(r'\d+', ' ', text)
+
+    # 6. Keep only alphabetic characters and spaces
+    text = re.sub(r'[^a-z\s]', ' ', text)
+
+    # 7. Collapse multiple spaces into one
+    text = re.sub(r'\s+', ' ', text).strip()
+
+    return text
+
+
+# Apply to full_text (subject + body combined)
+df['clean_text'] = df['full_text'].apply(clean_text)
+
+# Quick sanity check
+print('🔤 Sample BEFORE cleaning:')
+print(df['full_text'].iloc[0][:200])
+print('\n🔤 Sample AFTER cleaning:')
+print(df['clean_text'].iloc[0][:200])
+STOP_WORDS = set(stopwords.words('english'))
+
+def tokenize_and_remove_stopwords(text):
+    """
+    Tokenize text and remove English stopwords.
+    Returns a list of tokens.
+    """
+    tokens = word_tokenize(text)           # NLTK punkt tokenizer
+    tokens = [t for t in tokens
+               if t not in STOP_WORDS      # remove stopwords
+               and len(t) > 1]             # remove single characters
+    return tokens
+
+
+df['tokens'] = df['clean_text'].apply(tokenize_and_remove_stopwords)
+
+# Show example
+print('🔑 Example tokens (first 20):')
+print(df['tokens'].iloc[0][:20])
+print(f'\n   Average tokens per email: {df["tokens"].apply(len).mean():.0f}')
+lemmatizer = WordNetLemmatizer()
+stemmer    = PorterStemmer()
+
+def lemmatize_tokens(tokens):
+    """Lemmatize a list of tokens and rejoin to string."""
+    return ' '.join([lemmatizer.lemmatize(t) for t in tokens])
+
+def stem_tokens(tokens):
+    """Stem a list of tokens and rejoin to string (for reference)."""
+    return ' '.join([stemmer.stem(t) for t in tokens])
+
+
+# Using lemmatization → stored in 'processed_text'
+df['processed_text'] = df['tokens'].apply(lemmatize_tokens)
+
+# Show comparison
+example_tokens = df['tokens'].iloc[1][:8]
+print('📊 Comparison (first 8 tokens from email #2):')
+print(f"  Original   : {example_tokens}")
+print(f"  Lemmatized : {[lemmatizer.lemmatize(t) for t in example_tokens]}")
+print(f"  Stemmed    : {[stemmer.stem(t) for t in example_tokens]}")
+print(f'Total emails before dropping empties: {len(df)}')
+
+# Drop rows where processed_text is empty or whitespace only
+df = df[df['processed_text'].str.strip().str.len() > 10].reset_index(drop=True)
+
+print(f'Total emails after  dropping empties: {len(df)}')
+print(f"\nClass distribution:")
+print(df['label'].value_counts().rename({0: 'Ham (0)', 1: 'Spam (1)'}).to_string())
+tfidf = TfidfVectorizer(
+    max_features=10000,
+    ngram_range=(1, 2),     # unigrams + bigrams
+    sublinear_tf=True,      # log(1 + tf) instead of raw tf
+    min_df=2,               # must appear in at least 2 emails
+    strip_accents='unicode',
+    analyzer='word',
+)
+
+X_tfidf = tfidf.fit_transform(df['processed_text'])
+
+print(f'✅ TF-IDF matrix shape: {X_tfidf.shape}')
+print(f'   Rows = emails, Columns = n-gram features')
+print(f'   Top 10 features: {tfidf.get_feature_names_out()[:10].tolist()}')
+def extract_structural_features(row):
+    """
+    Compute handcrafted numeric features from raw email fields.
+    """
+    body    = str(row.get('body', ''))
+    subject = str(row.get('subject', ''))
+    sender  = str(row.get('sender', ''))
+
+    return {
+        # Length features
+        'body_length':         len(body),
+        'subject_length':      len(subject),
+        'num_words_body':      len(body.split()),
+
+        # Spam signal features
+        'num_exclamations':    body.count('!') + subject.count('!'),
+        'num_question_marks':  body.count('?'),
+        'num_dollar_signs':    body.count('$'),
+        'has_html':            int(bool(re.search(r'<[a-z][\s\S]*?>', body, re.I))),
+        'num_urls':            len(re.findall(r'http\S+|www\.\S+', body, re.I)),
+        'num_email_addresses': len(re.findall(r'\S+@\S+', body)),
+        'subject_all_caps':    int(bool(re.search(r'\b[A-Z]{3,}\b', subject))),
+        'subject_has_digits':  int(bool(re.search(r'\d', subject))),
+        'subject_has_free':    int('free' in subject.lower()),
+        'sender_is_numeric':   int(bool(re.search(r'\d{4,}', sender))),
+    }
+
+
+print('⚙️  Extracting structural features...')
+structural_features = df.apply(extract_structural_features, axis=1)
+df_struct = pd.DataFrame(structural_features.tolist())
+
+print(f'✅ Structural feature matrix shape: {df_struct.shape}')
+df_struct.head(3)
+from sklearn.preprocessing import StandardScaler
+
+# Scale structural features (important before combining with TF-IDF)
+scaler   = StandardScaler()
+X_struct = scaler.fit_transform(df_struct.values)
+X_struct_sparse = csr_matrix(X_struct)   # convert to sparse for hstack
+
+# Horizontally stack: TF-IDF columns + structural columns
+X_combined = hstack([X_tfidf, X_struct_sparse])
+y          = df['label'].values
+
+print(f'✅ Combined feature matrix shape: {X_combined.shape}')
+print(f'   TF-IDF features  : {X_tfidf.shape[1]}')
+print(f'   Structural feats  : {X_struct.shape[1]}')
+print(f'   Total features    : {X_combined.shape[1]}')
+print(f'   Labels (y) shape  : {y.shape}')
+import matplotlib.pyplot as plt
+
+fig, axes = plt.subplots(1, 3, figsize=(15, 4))
+fig.suptitle('SpamAssassin Dataset — EDA', fontsize=14, fontweight='bold')
+
+# 1. Class distribution
+label_counts = pd.Series(y).value_counts().rename({0: 'Ham', 1: 'Spam'})
+axes[0].bar(label_counts.index, label_counts.values, color=['steelblue', 'tomato'])
+axes[0].set_title('Class Distribution')
+axes[0].set_ylabel('Count')
+
+# 2. Body length distribution by class
+for lbl, color, name in [(0, 'steelblue', 'Ham'), (1, 'tomato', 'Spam')]:
+    subset = df_struct.loc[df['label'] == lbl, 'body_length'].clip(0, 5000)
+    axes[1].hist(subset, bins=50, alpha=0.6, color=color, label=name)
+axes[1].set_title('Body Length Distribution')
+axes[1].set_xlabel('Characters')
+axes[1].legend()
+
+# 3. Exclamation marks
+for lbl, color, name in [(0, 'steelblue', 'Ham'), (1, 'tomato', 'Spam')]:
+    subset = df_struct.loc[df['label'] == lbl, 'num_exclamations'].clip(0, 20)
+    axes[2].hist(subset, bins=20, alpha=0.6, color=color, label=name)
+axes[2].set_title('Exclamation Marks Distribution')
+axes[2].set_xlabel('Count')
+axes[2].legend()
+
+plt.tight_layout()
+plt.show()
+X_train, X_test, y_train, y_test = train_test_split(
+    X_combined, y,
+    test_size=0.20,
+    random_state=42,
+    stratify=y          # maintain spam/ham ratio in both splits
+)
+
+print('✅ Split complete:')
+print(f'   X_train : {X_train.shape}  |  y_train spam rate: {y_train.mean():.2%}')
+print(f'   X_test  : {X_test.shape}   |  y_test  spam rate: {y_test.mean():.2%}')
+import scipy.sparse as sp
+import joblib
+
+SAVE_DIR = '/content/processed_data'
+os.makedirs(SAVE_DIR, exist_ok=True)
+
+# 1. Save the clean DataFrame (text + labels + structural features)
+df_save = df[['label', 'folder', 'subject', 'clean_text', 'processed_text']].copy()
+df_save = pd.concat([df_save.reset_index(drop=True), df_struct.reset_index(drop=True)], axis=1)
+df_save.to_csv(f'{SAVE_DIR}/spam_clean_df.csv', index=False)
+
+# 2. Save sparse feature matrices
+sp.save_npz(f'{SAVE_DIR}/X_train.npz', X_train)
+sp.save_npz(f'{SAVE_DIR}/X_test.npz',  X_test)
+np.save(f'{SAVE_DIR}/y_train.npy', y_train)
+np.save(f'{SAVE_DIR}/y_test.npy',  y_test)
+
+# 3. Save fitted transformers (needed at inference time)
+joblib.dump(tfidf,   f'{SAVE_DIR}/tfidf_vectorizer.pkl')
+joblib.dump(scaler,  f'{SAVE_DIR}/structural_scaler.pkl')
+
+print('💾 Saved files:')
+for f in os.listdir(SAVE_DIR):
+    size = os.path.getsize(f'{SAVE_DIR}/{f}') / 1024
+    print(f'   {f:<35} {size:>8.1f} KB')
+from sklearn.linear_model import LogisticRegression
+from sklearn.metrics import classification_report, accuracy_score
+
+print('🚀 Running quick Logistic Regression baseline...')
+clf = LogisticRegression(max_iter=1000, solver='lbfgs', C=1.0)
+clf.fit(X_train, y_train)
+y_pred = clf.predict(X_test)
+
+print(f'\n📈 Accuracy : {accuracy_score(y_test, y_pred):.4f}')
+print('\nClassification Report:')
+print(classification_report(y_test, y_pred, target_names=['Ham', 'Spam']))
+print('═' * 55)
+print('  PREPROCESSING PIPELINE — COMPLETE SUMMARY')
+print('═' * 55)
+print(f'  Total emails       : {len(df):>6}')
+print(f'  Ham emails         : {(df["label"]==0).sum():>6}')
+print(f'  Spam emails        : {(df["label"]==1).sum():>6}')
+print(f'  TF-IDF features    : {X_tfidf.shape[1]:>6}')
+print(f'  Structural features: {df_struct.shape[1]:>6}')
+print(f'  Total features     : {X_combined.shape[1]:>6}')
+print(f'  Training samples   : {X_train.shape[0]:>6}')
+print(f'  Test samples       : {X_test.shape[0]:>6}')
+print('═' * 55)
+print('  ✅ Pipeline completed. Ready for model training!')
+print('═' * 55)
